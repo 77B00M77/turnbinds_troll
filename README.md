@@ -11,8 +11,11 @@ This program aims to fill the gap created by Valve disabling access to the `cl_y
 These convars, which control the turning speed for the `+left/+right` commands, are essential for movement game modes like surf.
 
 - [Usage](#usage)
+- [Fork additions](#fork-additions)
 - [Anti-cheat software](#anti-cheat-software)
 - [Development](#development)
+
+> This is a fork of [t5mat/turnbinds](https://github.com/t5mat/turnbinds) (MIT, see [LICENSE.md](LICENSE.md)). All credit for the original program goes to its author. The fork only adds the spin binds described under [Fork additions](#fork-additions); the original turnbinds behave exactly as before.
 
 ## Usage
 
@@ -73,6 +76,40 @@ Navigate down until the selector is hidden and press **Return** to enter develop
 - *rate* (default 1000) - maximum number of simulated mouse inputs per second, lower values decrease CPU usage in favor of turn smoothness
 - *sleep* (default 3500) - main loop sleep duration (measured in 100ns units, 3500 = 0.35ms), higher values decrease input polling rate and overall CPU usage
 
+## Fork additions
+
+Note: the *Download* link above is the original program, without these additions. Build this fork yourself (see [Development](#development)).
+
+### Spin binds
+
+Two extra binds that turn your view by an exact number of full rotations (a "perfect 360"), mostly for trolling spectators.
+
+- *spin* - a fast spin
+- *slow spin* - a slow-motion spin, for maximum disrespect
+
+Both are unbound by default. Select one and press **Return** to bind it like any other key, or press **Delete** to unbind it.
+
+### Spin variables
+
+- *spin_duration* (default 0.4) - how long a *spin* takes, in seconds
+- *spin_count* (default `1 2`) - rotations per *spin*. Can have multiple values (space-delimited), cycled by the *cycle* key (or left/right arrows in the program), so by default *cycle* switches between a 360 and a 720
+- *slowspin_duration* (default 2.5) - how long a *slow spin* takes, in seconds
+- *slowspin_count* (default 1) - rotations per *slow spin*
+- *spin_direction* (default right) - left or right, shared by both spins
+
+These are saved to the `.ini` like everything else. An invalid spin value only disables that spin; it never puts the program into the error state.
+
+### How it works
+
+- The number of mouse counts is `counts = (360 * rotations) / (sensitivity * m_yaw)`, using the currently active (cycled) *sensitivity* and *m_yaw* values.
+- The movement is sent smoothly over the duration through the same simulated mouse input as the turnbinds, limited by the *rate* setting (it isn't one big jump).
+- Mouse counts are whole numbers, so each spin sends a whole number of counts and carries the leftover fraction over to the next spin. Repeated spins never drift: you always end up within half a mouse count of the starting angle.
+- Pressing a spin key while a spin is in progress is ignored (spins don't stack).
+- Spins work alongside the turnbinds: holding *+left/+right* during a spin simply adds to it.
+- If the program becomes inactive mid-spin (e.g. a menu opens and the cursor appears), the spin is cancelled.
+
+**For the spin to land exactly on 360, the program's *sensitivity* and *m_yaw* must match your in-game values** (and with cycled sensitivities, the currently highlighted one must match what's active in-game).
+
 ## Anti-cheat software
 
 The program does not patch or inject anything into the game.
@@ -88,3 +125,12 @@ Standalone anti-cheat software (FACEIT AC, ...) can easily detect mouse movement
 To build into `./build`:
 
 ```docker build . -o ./build --progress=plain```
+
+Native Windows build without Docker (fork addition): with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) (the same toolchain the Dockerfile uses), CMake 3.28+ and Ninja on `PATH`:
+
+```
+cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-clang++ -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres
+cmake --build build --config Release
+```
+
+The executable ends up in `build/Release/turnbinds.exe`.

@@ -6,6 +6,7 @@
 #include "resources.hpp"
 #include "config.hpp"
 #include "mouse_move_state.hpp"
+#include "spin_state.hpp"
 
 using namespace common;
 
@@ -15,6 +16,8 @@ enum class Bind
     RIGHT,
     SPEED,
     CYCLE,
+    SPIN,
+    SLOWSPIN,
     COUNT
 };
 
@@ -22,8 +25,27 @@ enum class Var
 {
     RATE,
     SLEEP,
+    SPIN_DURATION,
+    SPIN_COUNT,
+    SLOWSPIN_DURATION,
+    SLOWSPIN_COUNT,
     COUNT
 };
+
+// Fork addition: spin variables don't affect the program's overall validity,
+// so a bad spin value only disables spinning, never the turnbinds.
+static constexpr auto is_spin_var(Var var)
+{
+    switch (var) {
+    case Var::SPIN_DURATION:
+    case Var::SPIN_COUNT:
+    case Var::SLOWSPIN_DURATION:
+    case Var::SLOWSPIN_COUNT:
+        return true;
+    default:
+        return false;
+    }
+}
 
 enum class CycleVar
 {
@@ -37,6 +59,7 @@ enum class CycleVar
 enum class Switch
 {
     ENABLED,
+    SPIN_DIRECTION,
     COUNT
 };
 
@@ -46,10 +69,17 @@ enum class ConsoleItem
     BIND_RIGHT,
     BIND_SPEED,
     BIND_CYCLE,
+    BIND_SPIN,
+    BIND_SLOWSPIN,
     CL_YAWSPEED,
     SENSITIVITY,
     CL_ANGLESPEEDKEY,
     M_YAW,
+    SPIN_DURATION,
+    SPIN_COUNT,
+    SLOWSPIN_DURATION,
+    SLOWSPIN_COUNT,
+    SPIN_DIRECTION,
     ENABLED,
     RATE,
     SLEEP,
@@ -72,6 +102,8 @@ static constexpr auto console_item_type(ConsoleItem item)
     case ConsoleItem::BIND_RIGHT:
     case ConsoleItem::BIND_SPEED:
     case ConsoleItem::BIND_CYCLE:
+    case ConsoleItem::BIND_SPIN:
+    case ConsoleItem::BIND_SLOWSPIN:
         return ConsoleItemType::BIND;
     case ConsoleItem::CL_YAWSPEED:
     case ConsoleItem::SENSITIVITY:
@@ -79,9 +111,14 @@ static constexpr auto console_item_type(ConsoleItem item)
     case ConsoleItem::M_YAW:
         return ConsoleItemType::CYCLE_VAR;
     case ConsoleItem::ENABLED:
+    case ConsoleItem::SPIN_DIRECTION:
         return ConsoleItemType::SWITCH;
     case ConsoleItem::RATE:
     case ConsoleItem::SLEEP:
+    case ConsoleItem::SPIN_DURATION:
+    case ConsoleItem::SPIN_COUNT:
+    case ConsoleItem::SLOWSPIN_DURATION:
+    case ConsoleItem::SLOWSPIN_COUNT:
         return ConsoleItemType::VAR;
     default:
         return ConsoleItemType::COUNT;
@@ -103,6 +140,7 @@ static constexpr auto is_line_break_console_item(ConsoleItem item)
 {
     switch (item) {
     case ConsoleItem::CL_YAWSPEED:
+    case ConsoleItem::SPIN_DURATION:
     case ConsoleItem::ENABLED:
     case ConsoleItem::RATE:
         return true;
@@ -122,6 +160,10 @@ static constexpr auto to_bind(ConsoleItem item)
         return Bind::SPEED;
     case ConsoleItem::BIND_CYCLE:
         return Bind::CYCLE;
+    case ConsoleItem::BIND_SPIN:
+        return Bind::SPIN;
+    case ConsoleItem::BIND_SLOWSPIN:
+        return Bind::SLOWSPIN;
     default:
         return Bind::COUNT;
     }
@@ -134,6 +176,14 @@ static constexpr auto to_var(ConsoleItem item)
         return Var::RATE;
     case ConsoleItem::SLEEP:
         return Var::SLEEP;
+    case ConsoleItem::SPIN_DURATION:
+        return Var::SPIN_DURATION;
+    case ConsoleItem::SPIN_COUNT:
+        return Var::SPIN_COUNT;
+    case ConsoleItem::SLOWSPIN_DURATION:
+        return Var::SLOWSPIN_DURATION;
+    case ConsoleItem::SLOWSPIN_COUNT:
+        return Var::SLOWSPIN_COUNT;
     default:
         return Var::COUNT;
     }
@@ -160,6 +210,8 @@ static constexpr auto to_switch(ConsoleItem item)
     switch (item) {
     case ConsoleItem::ENABLED:
         return Switch::ENABLED;
+    case ConsoleItem::SPIN_DIRECTION:
+        return Switch::SPIN_DIRECTION;
     default:
         return Switch::COUNT;
     }
@@ -174,6 +226,11 @@ struct State
     std::vector<double> cycle_vars[std::to_underlying(CycleVar::COUNT)];
     bool switches[std::to_underlying(Switch::COUNT)];
     int current;
+
+    // Fork addition: spin_count can hold multiple values, cycled by the cycle key
+    // with its own index (independent of the cl_yawspeed/sensitivity/... cycle)
+    std::vector<double> spin_counts;
+    int spin_current;
 
     bool valid;
     int count;
@@ -191,6 +248,7 @@ struct State
     void on_cycle_vars_changed();
     void on_switch_changed(Switch switch_);
     void on_current_changed();
+    void on_spin_current_changed();
     void on_valid_updated();
     void on_selected_changed(ConsoleItem prev);
 
@@ -243,6 +301,9 @@ struct Console
         case Switch::ENABLED:
             redraw_item_value(ConsoleItem::ENABLED);
             break;
+        case Switch::SPIN_DIRECTION:
+            redraw_item_value(ConsoleItem::SPIN_DIRECTION);
+            break;
         }
     }
 
@@ -252,6 +313,11 @@ struct Console
         redraw_item_value(ConsoleItem::SENSITIVITY);
         redraw_item_value(ConsoleItem::CL_ANGLESPEEDKEY);
         redraw_item_value(ConsoleItem::M_YAW);
+    }
+
+    void on_spin_current_changed()
+    {
+        redraw_item_value(ConsoleItem::SPIN_COUNT);
     }
 
     void on_selected_changed(ConsoleItem prev)
@@ -359,6 +425,22 @@ public:
                                     g_state.on_switch_changed(switch_);
                                 }
                                 break;
+                            case ConsoleItemType::VAR:
+                                if (g_state.selected == ConsoleItem::SPIN_COUNT && g_state.spin_counts.size() > 1) {
+                                    auto size = static_cast<int>(g_state.spin_counts.size());
+                                    g_state.spin_current = (right ? (g_state.spin_current + 1) : (g_state.spin_current - 1 + size)) % size;
+                                    g_state.on_spin_current_changed();
+                                }
+                                break;
+                            }
+                        }
+                        break;
+                    case VK_DELETE:
+                        // Fork addition: Delete unbinds the (optional) spin binds
+                        if (events[i].Event.KeyEvent.bKeyDown) {
+                            if (g_state.selected == ConsoleItem::BIND_SPIN || g_state.selected == ConsoleItem::BIND_SLOWSPIN) {
+                                g_state.binds[std::to_underlying(to_bind(g_state.selected))] = 0;
+                                redraw_item_value(g_state.selected);
                             }
                         }
                         break;
@@ -423,17 +505,25 @@ private:
         L"+right",
         L"+speed",
         L"cycle",
+        L"spin",
+        L"slow spin",
         L"cl_yawspeed",
         L"sensitivity",
         L"cl_anglespeedkey",
         L"m_yaw",
+        L"spin_duration",
+        L"spin_count",
+        L"slowspin_duration",
+        L"slowspin_count",
+        L"spin_direction",
         L"enabled",
         L"rate",
         L"sleep"
     };
+    static_assert(std::size(CONSOLE_ITEM_NAMES) == std::to_underlying(ConsoleItem::COUNT));
     static constexpr const wchar_t *SELECTOR[] = {L"   ", L" » "};
     static constexpr SHORT BUFFER_WIDTH = 64;
-    static constexpr SHORT BUFFER_HEIGHT[] = {17, 20};
+    static constexpr SHORT BUFFER_HEIGHT[] = {25, 28};
     static constexpr auto INPUT_PADDING = 18;
 
     const VersionInfo &version_info;
@@ -611,7 +701,9 @@ private:
                 auto bind = to_bind(item);
 
                 wchar_t buffer[BUFFER_WIDTH + 1];
-                if (!win32::get_vk_string(g_state.binds[std::to_underlying(bind)], buffer, std::size(buffer))) {
+                if (g_state.binds[std::to_underlying(bind)] == 0) {
+                    std::swprintf(buffer, std::size(buffer), L"<unbound>");
+                } else if (!win32::get_vk_string(g_state.binds[std::to_underlying(bind)], buffer, std::size(buffer))) {
                     buffer[0] = L'\0';
                 }
 
@@ -625,6 +717,34 @@ private:
                 }
 
                 auto var = to_var(item);
+
+                // Fork addition: highlight the active spin_count value, like the cycle vars
+                if (var == Var::SPIN_COUNT && !editing && g_state.vars[std::to_underlying(var)] && g_state.spin_counts.size() > 1) {
+                    const wchar_t *start = g_state.vars_text[std::to_underlying(var)];
+                    for (int i = 0; i < g_state.spin_counts.size(); ++i) {
+                        double d;
+                        auto *end = parse_double(start, d);
+                        auto current_end = end;
+                        while (std::isspace(*(current_end - 1))) {
+                            --current_end;
+                        }
+
+                        auto current = (i == g_state.spin_current);
+
+                        if (current) {
+                            out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                        }
+                        out.write_info(start, current_end - start, info);
+                        if (current) {
+                            out.set_text_attributes(info.wAttributes);
+                        }
+                        out.write_info(current_end, end - current_end, info);
+
+                        start = end;
+                    }
+                    break;
+                }
+
                 out.write_text_info(g_state.vars_text[std::to_underlying(var)], info);
             }
             break;
@@ -667,11 +787,12 @@ private:
         case ConsoleItemType::SWITCH:
             {
                 auto switch_ = to_switch(item);
+                bool direction = (switch_ == Switch::SPIN_DIRECTION);
 
                 if (!g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
                 }
-                out.write_text_info(L"off", info);
+                out.write_text_info(direction ? L"left" : L"off", info);
                 if (!g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(info.wAttributes);
                 }
@@ -681,7 +802,7 @@ private:
                 if (g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(BACKGROUND_RED | BACKGROUND_BLUE | FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
                 }
-                out.write_text_info(L"on", info);
+                out.write_text_info(direction ? L"right" : L"on", info);
                 if (g_state.switches[std::to_underlying(switch_)]) {
                     out.set_text_attributes(info.wAttributes);
                 }
@@ -774,6 +895,7 @@ struct App
         bool active = false;
         std::array<bool, std::to_underlying(Bind::COUNT)> binds_down;
         MouseMoveState mouse_move_state;
+        SpinState spin_state;
 
         do {
         peek:
@@ -798,6 +920,8 @@ struct App
                 !cursor_visibility_observer.visible();
 
             if (!active) {
+                spin_state.cancel();
+
                 HANDLE handles[] = {console->in.handle};
                 MsgWaitForMultipleObjects(std::size(handles), handles, false, INFINITE, QS_ALLINPUT);
                 continue;
@@ -819,7 +943,49 @@ struct App
             if (!prev_binds_down[std::to_underlying(Bind::CYCLE)] && binds_down[std::to_underlying(Bind::CYCLE)]) {
                 g_state.current = (g_state.current + 1) % g_state.count;
                 g_state.on_current_changed();
+
+                if (g_state.spin_counts.size() > 1) {
+                    g_state.spin_current = (g_state.spin_current + 1) % g_state.spin_counts.size();
+                    g_state.on_spin_current_changed();
+                }
             }
+
+            // Fork addition: spin binds (presses while a spin is in progress are ignored)
+            if (!spin_state.spinning()) {
+                auto spin_pressed = [&](Bind bind) {
+                    return g_state.binds[std::to_underlying(bind)] != 0 && !prev_binds_down[std::to_underlying(bind)] && binds_down[std::to_underlying(bind)];
+                };
+
+                std::optional<double> rotations;
+                std::optional<double> duration;
+                if (spin_pressed(Bind::SPIN)) {
+                    if (g_state.vars[std::to_underlying(Var::SPIN_DURATION)] && g_state.vars[std::to_underlying(Var::SPIN_COUNT)]) {
+                        rotations = g_state.spin_counts[g_state.spin_current % g_state.spin_counts.size()];
+                        duration = g_state.vars[std::to_underlying(Var::SPIN_DURATION)];
+                    }
+                } else if (spin_pressed(Bind::SLOWSPIN)) {
+                    if (g_state.vars[std::to_underlying(Var::SLOWSPIN_DURATION)] && g_state.vars[std::to_underlying(Var::SLOWSPIN_COUNT)]) {
+                        rotations = g_state.vars[std::to_underlying(Var::SLOWSPIN_COUNT)];
+                        duration = g_state.vars[std::to_underlying(Var::SLOWSPIN_DURATION)];
+                    }
+                }
+
+                if (rotations) {
+                    // Currently active (cycled) sensitivity and m_yaw values
+                    auto sensitivity = g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)].size()];
+                    auto yaw = g_state.cycle_vars[std::to_underlying(CycleVar::YAW)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAW)].size()];
+
+                    if (sensitivity * yaw > 0.0) {
+                        auto counts = (360.0 * *rotations) / (sensitivity * yaw);
+                        if (!g_state.switches[std::to_underlying(Switch::SPIN_DIRECTION)]) {
+                            counts = -counts;
+                        }
+                        spin_state.start(counts, *duration);
+                    }
+                }
+            }
+
+            auto spin_amount = spin_state.update(*g_state.vars[std::to_underlying(Var::RATE)]);
 
             auto amount = mouse_move_state.update(
                 !prev_active,
@@ -831,6 +997,7 @@ struct App
                 g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::ANGLESPEEDKEY)].size()],
                 g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::SENSITIVITY)].size()],
                 g_state.cycle_vars[std::to_underlying(CycleVar::YAW)][g_state.current % g_state.cycle_vars[std::to_underlying(CycleVar::YAW)].size()]);
+            amount += spin_amount;
             if (amount != 0) {
                 win32::move_mouse_by(amount, 0);
             }
@@ -864,8 +1031,16 @@ void State::on_config_loaded(Config &config)
     g_state.binds[std::to_underlying(Bind::RIGHT)] = config.bind_right;
     g_state.binds[std::to_underlying(Bind::SPEED)] = config.bind_speed;
     g_state.binds[std::to_underlying(Bind::CYCLE)] = config.bind_cycle;
+    g_state.binds[std::to_underlying(Bind::SPIN)] = config.bind_spin;
+    g_state.binds[std::to_underlying(Bind::SLOWSPIN)] = config.bind_slowspin;
     std::wcscpy(g_state.vars_text[std::to_underlying(Var::RATE)], config.rate);
     std::wcscpy(g_state.vars_text[std::to_underlying(Var::SLEEP)], config.sleep);
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::SPIN_DURATION)], config.spin_duration);
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::SPIN_COUNT)], config.spin_count);
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::SLOWSPIN_DURATION)], config.slowspin_duration);
+    std::wcscpy(g_state.vars_text[std::to_underlying(Var::SLOWSPIN_COUNT)], config.slowspin_count);
+    g_state.switches[std::to_underlying(Switch::SPIN_DIRECTION)] = config.spin_right;
+    g_state.spin_current = config.spin_current;
     std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)], config.cl_yawspeed);
     std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)], config.sensitivity);
     std::wcscpy(g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)], config.cl_anglespeedkey);
@@ -877,6 +1052,9 @@ void State::on_config_loaded(Config &config)
 
     for (int i = 0; i < std::to_underlying(Var::COUNT); ++i) {
         parse_var(static_cast<Var>(i));
+    }
+    if (g_state.spin_current < 0 || g_state.spin_counts.empty() || g_state.spin_current > static_cast<int>(g_state.spin_counts.size()) - 1) {
+        g_state.spin_current = 0;
     }
 
     parse_cycle_vars();
@@ -901,8 +1079,16 @@ void State::on_config_save(Config &config)
     config.bind_right = g_state.binds[std::to_underlying(Bind::RIGHT)];
     config.bind_speed = g_state.binds[std::to_underlying(Bind::SPEED)];
     config.bind_cycle = g_state.binds[std::to_underlying(Bind::CYCLE)];
+    config.bind_spin = g_state.binds[std::to_underlying(Bind::SPIN)];
+    config.bind_slowspin = g_state.binds[std::to_underlying(Bind::SLOWSPIN)];
     std::wcscpy(config.rate, g_state.vars_text[std::to_underlying(Var::RATE)]);
     std::wcscpy(config.sleep, g_state.vars_text[std::to_underlying(Var::SLEEP)]);
+    std::wcscpy(config.spin_duration, g_state.vars_text[std::to_underlying(Var::SPIN_DURATION)]);
+    std::wcscpy(config.spin_count, g_state.vars_text[std::to_underlying(Var::SPIN_COUNT)]);
+    std::wcscpy(config.slowspin_duration, g_state.vars_text[std::to_underlying(Var::SLOWSPIN_DURATION)]);
+    std::wcscpy(config.slowspin_count, g_state.vars_text[std::to_underlying(Var::SLOWSPIN_COUNT)]);
+    config.spin_right = g_state.switches[std::to_underlying(Switch::SPIN_DIRECTION)];
+    config.spin_current = g_state.spin_current;
     std::wcscpy(config.cl_yawspeed, g_state.cycle_vars_text[std::to_underlying(CycleVar::YAWSPEED)]);
     std::wcscpy(config.sensitivity, g_state.cycle_vars_text[std::to_underlying(CycleVar::SENSITIVITY)]);
     std::wcscpy(config.cl_anglespeedkey, g_state.cycle_vars_text[std::to_underlying(CycleVar::ANGLESPEEDKEY)]);
@@ -924,7 +1110,11 @@ void State::on_developer_changed()
 
 void State::on_var_changed(Var var)
 {
+    auto prev_spin_counts = g_state.spin_counts.size();
     parse_var(var);
+    if (g_state.spin_counts.size() != prev_spin_counts || g_state.spin_current > static_cast<int>(g_state.spin_counts.size()) - 1) {
+        g_state.spin_current = 0;
+    }
     update_valid();
 }
 
@@ -955,6 +1145,11 @@ void State::on_current_changed()
     App::console->on_current_changed();
 }
 
+void State::on_spin_current_changed()
+{
+    App::console->on_spin_current_changed();
+}
+
 void State::on_valid_updated()
 {
     App::reset_console_window_title();
@@ -969,6 +1164,9 @@ void State::update_valid()
 {
     g_state.valid = (g_state.count > 0);
     for (int i = 0; (i < std::to_underlying(Var::COUNT)) && (g_state.valid); ++i) {
+        if (is_spin_var(static_cast<Var>(i))) {
+            continue;
+        }
         g_state.valid = (g_state.valid && g_state.vars[i]);
     }
     on_valid_updated();
@@ -976,6 +1174,37 @@ void State::update_valid()
 
 void State::parse_var(Var var)
 {
+    // Fork addition: spin_count is a space-delimited list of rotation counts (each > 0)
+    if (var == Var::SPIN_COUNT) {
+        g_state.spin_counts.clear();
+        g_state.vars[std::to_underlying(var)] = std::nullopt;
+
+        const wchar_t *p = g_state.vars_text[std::to_underlying(var)];
+        do {
+            double d;
+            p = parse_double(p, d);
+
+            if (std::isnan(d) || !std::isfinite(d) || d <= 0.0) {
+                g_state.spin_counts.clear();
+                return;
+            }
+
+            g_state.spin_counts.push_back(d);
+
+            if (*p == L'\0') {
+                break;
+            }
+
+            if (!std::isspace(*(p - 1))) {
+                g_state.spin_counts.clear();
+                return;
+            }
+        } while (true);
+
+        g_state.vars[std::to_underlying(var)] = g_state.spin_counts[0];
+        return;
+    }
+
     double d;
     auto p = parse_double(g_state.vars_text[std::to_underlying(var)], d);
 
@@ -993,6 +1222,19 @@ void State::parse_var(Var var)
         break;
     case Var::SLEEP:
         if (d >= 1000000.0) {
+            g_state.vars[std::to_underlying(var)] = std::nullopt;
+            return;
+        }
+        break;
+    case Var::SPIN_DURATION:
+    case Var::SLOWSPIN_DURATION:
+        if (!std::isfinite(d) || d > 3600.0) {
+            g_state.vars[std::to_underlying(var)] = std::nullopt;
+            return;
+        }
+        break;
+    case Var::SLOWSPIN_COUNT:
+        if (!std::isfinite(d) || d == 0.0) {
             g_state.vars[std::to_underlying(var)] = std::nullopt;
             return;
         }
