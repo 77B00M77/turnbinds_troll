@@ -9,7 +9,7 @@ add_executable(turnbinds)
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/turnbinds.rc"
     PROPERTIES OBJECT_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/turnbinds.ico"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/turnbinds.ico;${CMAKE_CURRENT_SOURCE_DIR}/src/turnbinds.manifest"
 )
 
 file(GLOB_RECURSE src CONFIGURE_DEPENDS src/*.cpp src/*.rc)
@@ -25,7 +25,9 @@ target_compile_options(turnbinds PRIVATE
     -Wno-vla-cxx-extension
 )
 
-target_link_libraries(turnbinds PRIVATE version pathcch)
+target_link_libraries(turnbinds PRIVATE version pathcch comctl32)
+
+set_target_properties(turnbinds PROPERTIES WIN32_EXECUTABLE ON)
 
 target_link_options(turnbinds PRIVATE
     -static

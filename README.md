@@ -25,10 +25,13 @@ Settings are stored in `<exe-name>.ini`.
 
 ### Basic controls
 
-- **Esc/CTRL+C** - quit
-- **Up/down arrows** - navigate
-- **Return** - rebind key/edit variable
-- **Left/right arrows** - cycle between values/switch on/off
+This fork replaces the original console screen with a settings window:
+
+- **Key buttons** - click, then press the key (or mouse button) to bind. **Esc** cancels
+- **Text boxes** - type values; changes apply instantly. Invalid values turn red and the program pauses until they're fixed
+- **◀ / ▶** - step through the active value set (same as pressing the *cycle* key)
+- **Hover** over any setting for a short explanation
+- Close the window to quit; settings are saved to the `.ini` on close
 
 ### Variables
 
@@ -71,12 +74,15 @@ sensitivity 2.0
 
 ### Developer settings
 
-Navigate down until the selector is hidden and press **Return** to enter developer mode.
+Shown in the *General* section of the window.
 
 - *rate* (default 1000) - maximum number of simulated mouse inputs per second, lower values decrease CPU usage in favor of turn smoothness
 - *sleep* (default 3500) - main loop sleep duration (measured in 100ns units, 3500 = 0.35ms), higher values decrease input polling rate and overall CPU usage
 
 ## Fork additions
+
+- A settings window instead of the console screen (see [Basic controls](#basic-controls)). The turning behaviour is unchanged.
+- Spin binds (below).
 
 Note: the *Download* link above is the original program, without these additions. Build this fork yourself (see [Development](#development)).
 
@@ -87,12 +93,12 @@ Two extra binds that turn your view by an exact number of full rotations (a "per
 - *spin* - a fast spin
 - *slow spin* - a slow-motion spin, for maximum disrespect
 
-Both are unbound by default. Select one and press **Return** to bind it like any other key, or press **Delete** to unbind it.
+Both are unbound by default. Click its button and press a key to bind it, or click **clear** to unbind it.
 
 ### Spin variables
 
 - *spin_duration* (default 0.4) - how long a *spin* takes, in seconds
-- *spin_count* (default `1 2`) - rotations per *spin*. Can have multiple values (space-delimited), cycled by the *cycle* key (or left/right arrows in the program), so by default *cycle* switches between a 360 and a 720
+- *spin_count* (default `1 2`) - rotations per *spin*. Can have multiple values (space-delimited), cycled by the *cycle* key (or the ◀ / ▶ buttons next to *active spin_count*), so by default *cycle* switches between a 360 and a 720
 - *slowspin_duration* (default 2.5) - how long a *slow spin* takes, in seconds
 - *slowspin_count* (default 1) - rotations per *slow spin*
 - *spin_direction* (default right) - left or right, shared by both spins
@@ -107,6 +113,7 @@ These are saved to the `.ini` like everything else. An invalid spin value only d
 - Pressing a spin key while a spin is in progress is ignored (spins don't stack).
 - Spins work alongside the turnbinds: holding *+left/+right* during a spin simply adds to it.
 - If the program becomes inactive mid-spin (e.g. a menu opens and the cursor appears), the spin is cancelled.
+- The settings window also shows how many mouse counts a 360 is at your current sensitivity and m_yaw.
 
 **For the spin to land exactly on 360, the program's *sensitivity* and *m_yaw* must match your in-game values** (and with cycled sensitivities, the currently highlighted one must match what's active in-game).
 
